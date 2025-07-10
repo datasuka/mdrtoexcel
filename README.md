@@ -1,14 +1,15 @@
-# Mandiri PDF ke Excel
+# Mandiri PDF ke Excel (Streamlit App)
 
-Aplikasi Streamlit untuk mengubah rekening koran Bank Mandiri (format PDF) menjadi file Excel.
+Aplikasi Streamlit untuk mengubah rekening koran Bank Mandiri (PDF) menjadi file Excel.
 
-## Cara Pakai
+## Fitur
 
-1. Upload file PDF rekening Mandiri.
-2. Data akan otomatis diurai (tanggal, deskripsi, debit/kredit, saldo).
-3. Unduh hasilnya dalam format Excel.
+- Baca rekening Mandiri format tabel (Account Statement)
+- Ekstrak tanggal, deskripsi, debit, kredit, dan saldo
+- Tampilkan angka dengan **pemisah desimal koma**
+- Unduh hasil sebagai file Excel
 
-## Jalankan lokal
+## Jalankan Lokal
 
 ```bash
 streamlit run app.py
