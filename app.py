@@ -19,12 +19,12 @@ def parse_amount(text):
 
 def parse_mandiri_table(pdf_file):
     rows = []
-    account_number = None
+    account_number = 'UNKNOWN'
     try:
         with pdfplumber.open(pdf_file) as pdf:
             for page in pdf.pages:
                 text = page.extract_text()
-                if not account_number and 'Account No.' in text:
+                if 'Account No.' in text:
                     match = re.search(r'Account No\.\s+(\d+)', text)
                     if match:
                         account_number = match.group(1)
@@ -33,24 +33,28 @@ def parse_mandiri_table(pdf_file):
                 if not table:
                     continue
 
-                headers = [h.lower() for h in table[0]]
+                headers = [h.lower() if h else '' for h in table[0]]
                 for row in table[1:]:
+                    if len(row) != len(headers):
+                        continue
                     row_dict = dict(zip(headers, row))
-                    tanggal_str = row_dict.get('posting date', '').strip()
+                    tanggal_str = (row_dict.get('posting date') or '').strip()
                     keterangan = (row_dict.get('remark') or '').strip().lstrip('-').strip()
                     debit_str = (row_dict.get('debit') or '0').replace(',', '').replace('.', '')
                     credit_str = (row_dict.get('credit') or '0').replace(',', '').replace('.', '')
                     saldo_str = (row_dict.get('balance') or '0').replace(',', '').replace('.', '')
 
-                    # Ambil tanggal + waktu
                     try:
                         tanggal = datetime.strptime(tanggal_str, '%d %b %Y, %H:%M:%S')
                     except:
                         tanggal = None
 
-                    debit = float(debit_str) / 100
-                    credit = float(credit_str) / 100
-                    saldo = float(saldo_str) / 100
+                    try:
+                        debit = float(debit_str) / 100
+                        credit = float(credit_str) / 100
+                        saldo = float(saldo_str) / 100
+                    except:
+                        debit, credit, saldo = 0.0, 0.0, 0.0
 
                     rows.append({
                         'no_rekening': account_number,
@@ -61,7 +65,7 @@ def parse_mandiri_table(pdf_file):
                         'saldo': saldo
                     })
     except Exception as e:
-        st.error(f"Gagal memproses file: {e}")
+        st.warning(f"File gagal dibaca: {e}")
 
     return pd.DataFrame(rows)
 
@@ -70,21 +74,25 @@ if uploaded_files:
     for file in uploaded_files:
         st.write(f"Memproses: {file.name}")
         df = parse_mandiri_table(file)
-        all_dfs.append(df)
+        if not df.empty:
+            all_dfs.append(df)
+        else:
+            st.warning(f"Tidak ada data ditemukan di: {file.name}")
 
     if all_dfs:
-        df_final = pd.concat(all_dfs).sort_values(by=['no_rekening', 'tanggal'])
+        df_final = pd.concat(all_dfs, ignore_index=True).sort_values(by=['no_rekening', 'tanggal'])
 
-        # Format angka dengan koma desimal (untuk tampilan)
+        # Format tampilan angka dengan koma
         df_display = df_final.copy()
         for col in ['debit', 'kredit', 'saldo']:
             df_display[col] = df_display[col].map(lambda x: f"{x:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
 
         st.dataframe(df_display)
 
-        # Simpan Excel (angka tetap dalam float)
         buffer = BytesIO()
         df_final.to_excel(buffer, index=False)
         buffer.seek(0)
 
         st.download_button("Download Excel", buffer, file_name="Mandiri_Excel.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    else:
+        st.error("Tidak ada data yang berhasil diproses.")
