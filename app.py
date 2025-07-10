@@ -19,16 +19,9 @@ def parse_amount(text):
 
 def parse_mandiri_table(pdf_file):
     rows = []
-    account_number = 'UNKNOWN'
     try:
         with pdfplumber.open(pdf_file) as pdf:
             for page in pdf.pages:
-                text = page.extract_text()
-                if 'Account No.' in text:
-                    match = re.search(r'Account No\.\s+(\d+)', text)
-                    if match:
-                        account_number = match.group(1)
-
                 table = page.extract_table()
                 if not table:
                     continue
@@ -57,7 +50,6 @@ def parse_mandiri_table(pdf_file):
                         debit, credit, saldo = 0.0, 0.0, 0.0
 
                     rows.append({
-                        'no_rekening': account_number,
                         'tanggal': tanggal,
                         'keterangan': keterangan,
                         'debit': debit,
@@ -80,7 +72,7 @@ if uploaded_files:
             st.warning(f"Tidak ada data ditemukan di: {file.name}")
 
     if all_dfs:
-        df_final = pd.concat(all_dfs, ignore_index=True).sort_values(by=['no_rekening', 'tanggal'])
+        df_final = pd.concat(all_dfs, ignore_index=True).sort_values(by=['tanggal'])
 
         # Format tampilan angka dengan koma
         df_display = df_final.copy()
