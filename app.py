@@ -13,7 +13,7 @@ def extract_data(pdf_file):
         all_text = [page.extract_text() for page in pdf.pages]
         full_text = "\n".join(all_text)
 
-    # Ambil info header
+    # Header extraction
     rekening = re.search(r"Account No\.\n?(\d+)", full_text)
     currency = re.search(r"Currency\n?(\w+)", full_text)
     opening_balance = re.search(r"Opening Balance\n?([\d.,]+)", full_text)
@@ -22,36 +22,37 @@ def extract_data(pdf_file):
     curr = currency.group(1) if currency else ""
     saldo_awal = opening_balance.group(1).replace(",", "") if opening_balance else ""
 
-    # Mulai parsing transaksi
+    # Parsing transaksi
     lines = full_text.split("\n")
-    tanggal_regex = re.compile(r"^\d{2}/\d{2}/\d{4}")
+    tanggal_pattern = re.compile(r"^\d{2}/\d{2}/\d{4}")
+    angka_pattern = re.compile(r"[-]?[\d,.]+")
 
     data_rows = []
     i = 0
     while i < len(lines):
-        if tanggal_regex.match(lines[i]):
-            tanggal = lines[i].strip()[:10]
+        line = lines[i].strip()
+        if tanggal_pattern.match(line):
+            tanggal = line[:10]
             tanggal_fmt = "/".join(reversed(tanggal.split("/")))
-
             i += 1
+
             keterangan = []
-            angka_found = False
             debit = kredit = saldo = ""
-
-            while i < len(lines) and not tanggal_regex.match(lines[i]):
-                nums = re.findall(r"[-]?[\d.,]+", lines[i])
-                if len(nums) == 3 and not angka_found:
-                    debit, kredit, saldo = [n.replace(",", "") for n in nums]
-                    angka_found = True
+            while i < len(lines):
+                teks = lines[i].strip()
+                angka = angka_pattern.findall(teks)
+                if len(angka) == 3:
+                    debit, kredit, saldo = [a.replace(",", "") for a in angka]
+                    i += 1
+                    break
                 else:
-                    keterangan.append(lines[i].strip())
-                i += 1
+                    keterangan.append(teks)
+                    i += 1
 
-            if angka_found:
-                data_rows.append([
-                    nomor_rekening, tanggal_fmt, " ".join(keterangan),
-                    debit, kredit, saldo, curr, saldo_awal
-                ])
+            data_rows.append([
+                nomor_rekening, tanggal_fmt, " ".join(keterangan),
+                debit, kredit, saldo, curr, saldo_awal
+            ])
         else:
             i += 1
 
