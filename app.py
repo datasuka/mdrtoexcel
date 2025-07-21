@@ -3,88 +3,63 @@ import streamlit as st
 import pdfplumber
 import pandas as pd
 import re
-from datetime import datetime
 from io import BytesIO
 
-st.set_page_config(page_title="Mandiri PDF ke Excel", layout="wide")
-st.title("Konversi Rekening Koran Mandiri (PDF) ke Excel")
+st.set_page_config(page_title="Mandiri RK to Excel", layout="wide")
+st.title("📄 Konversi Rekening Koran Mandiri ke Excel")
 
-uploaded_files = st.file_uploader("Upload file PDF Rekening Koran Mandiri", type="pdf", accept_multiple_files=True)
+def extract_data(pdf_file):
+    with pdfplumber.open(pdf_file) as pdf:
+        full_text = ""
+        for page in pdf.pages:
+            full_text += page.extract_text() + "\n"
 
-def parse_amount(text):
-    try:
-        return float(text.replace(',', '').replace('.', '').replace(',', '.'))
-    except:
-        return 0.0
+    rekening = re.search(r"Account No\.\s+(\d+)", full_text)
+    currency = re.search(r"Currency\s+(\w+)", full_text)
+    opening_balance = re.search(r"Opening Balance\n([\d.,]+)", full_text)
 
-def parse_mandiri_table(pdf_file):
-    rows = []
-    try:
-        with pdfplumber.open(pdf_file) as pdf:
-            for page in pdf.pages:
-                table = page.extract_table()
-                if not table:
-                    continue
+    records = []
+    lines = full_text.split("\n")
+    date_pattern = re.compile(r"^\d{2}/\d{2}/\d{4}")
 
-                headers = [h.lower() if h else '' for h in table[0]]
-                for row in table[1:]:
-                    if len(row) != len(headers):
-                        continue
-                    row_dict = dict(zip(headers, row))
-                    tanggal_str = (row_dict.get('posting date') or '').strip()
-                    keterangan = (row_dict.get('remark') or '').strip().lstrip('-').strip()
-                    debit_str = (row_dict.get('debit') or '0').replace(',', '').replace('.', '')
-                    credit_str = (row_dict.get('credit') or '0').replace(',', '').replace('.', '')
-                    saldo_str = (row_dict.get('balance') or '0').replace(',', '').replace('.', '')
+    i = 0
+    while i < len(lines):
+        if date_pattern.match(lines[i]):
+            tanggal = lines[i][:10]
+            tanggal_fmt = "/".join(reversed(tanggal.split("/")))
+            keterangan_lines = []
+            i += 1
+            while i < len(lines) and not date_pattern.match(lines[i]):
+                if re.search(r"\d{2}/\d{2}/\d{4}", lines[i]):
+                    break
+                keterangan_lines.append(lines[i])
+                i += 1
+            ketgabung = " ".join(keterangan_lines).strip()
 
-                    try:
-                        tanggal = datetime.strptime(tanggal_str, '%d %b %Y, %H:%M:%S')
-                    except:
-                        tanggal = None
-
-                    try:
-                        debit = float(debit_str) / 100
-                        credit = float(credit_str) / 100
-                        saldo = float(saldo_str) / 100
-                    except:
-                        debit, credit, saldo = 0.0, 0.0, 0.0
-
-                    rows.append({
-                        'tanggal': tanggal,
-                        'keterangan': keterangan,
-                        'debit': debit,
-                        'kredit': credit,
-                        'saldo': saldo
-                    })
-    except Exception as e:
-        st.warning(f"File gagal dibaca: {e}")
-
-    return pd.DataFrame(rows)
-
-if uploaded_files:
-    all_dfs = []
-    for file in uploaded_files:
-        st.write(f"Memproses: {file.name}")
-        df = parse_mandiri_table(file)
-        if not df.empty:
-            all_dfs.append(df)
+            debit, kredit, saldo = "", "", ""
+            angka = re.findall(r"[-]?[\d,.]+", lines[i - 1])
+            if len(angka) == 3:
+                debit, kredit, saldo = angka
+            records.append([tanggal_fmt, ketgabung, debit, kredit, saldo])
         else:
-            st.warning(f"Tidak ada data ditemukan di: {file.name}")
+            i += 1
 
-    if all_dfs:
-        df_final = pd.concat(all_dfs, ignore_index=True).sort_values(by=['tanggal'])
+    df = pd.DataFrame(records, columns=["Tanggal (dd/mm/yyyy)", "Keterangan", "Debit", "Kredit", "Saldo"])
+    df.insert(0, "Nomor Rekening", rekening.group(1) if rekening else "")
+    df["currency"] = currency.group(1) if currency else ""
+    df["Saldo awal"] = opening_balance.group(1).replace(",", "") if opening_balance else ""
+    return df
 
-        # Format tampilan angka dengan koma
-        df_display = df_final.copy()
-        for col in ['debit', 'kredit', 'saldo']:
-            df_display[col] = df_display[col].map(lambda x: f"{x:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+uploaded_file = st.file_uploader("Unggah File PDF Rekening Koran Mandiri", type="pdf")
 
-        st.dataframe(df_display)
+if uploaded_file:
+    try:
+        df = extract_data(uploaded_file)
+        st.success("Berhasil mengekstrak data. Berikut hasilnya:")
+        st.dataframe(df, use_container_width=True)
 
-        buffer = BytesIO()
-        df_final.to_excel(buffer, index=False)
-        buffer.seek(0)
-
-        st.download_button("Download Excel", buffer, file_name="Mandiri_Excel.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    else:
-        st.error("Tidak ada data yang berhasil diproses.")
+        output = BytesIO()
+        df.to_excel(output, index=False)
+        st.download_button("📥 Download Excel", output.getvalue(), file_name="Mandiri_RekeningKoran.xlsx")
+    except Exception as e:
+        st.error(f"Gagal mengekstrak data: {e}")
