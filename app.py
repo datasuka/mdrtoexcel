@@ -1,6 +1,3 @@
-# Simpan isi aplikasi Streamlit yang sudah diperbarui ke dalam file app.py
-
-app_py_content = """
 import streamlit as st
 import pandas as pd
 from io import BytesIO
@@ -32,8 +29,7 @@ def convert_df_to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Transaksi')
-    processed_data = output.getvalue()
-    return processed_data
+    return output.getvalue()
 
 def main():
     st.title("Konversi Rekening Mandiri ke Excel")
@@ -55,9 +51,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-"""
-
-with open("/mnt/data/app.py", "w", encoding="utf-8") as f:
-    f.write(app_py_content)
-
-"/mnt/data/app.py"
