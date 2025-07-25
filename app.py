@@ -6,7 +6,6 @@ import re
 
 
 def parse_amount(text):
-    """Ubah format angka lokal (1.000,00) jadi float"""
     try:
         return float(text.replace('.', '').replace(',', '.'))
     except:
@@ -19,12 +18,12 @@ def extract_transactions(file):
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
-            st.text_area("DEBUG - Isi Halaman PDF", text[:3000], height=250)
+            st.text_area("DEBUG - Isi PDF", text[:3000], height=250)
 
             lines = text.split('\n')
 
-            for line in lines:
-                # Cari pola: tanggal waktu deskripsi nominal debit kredit saldo
+            for i, line in enumerate(lines):
+                # Deteksi baris transaksi lengkap
                 match = re.search(
                     r'(\d{2}/\d{2}/\d{4}) (\d{2}:\d{2}:\d{2}) (.+?) (-?\d[\d.,]*) (-?\d[\d.,]*) (-?\d[\d.,]*)$',
                     line
@@ -32,15 +31,21 @@ def extract_transactions(file):
                 if match:
                     tanggal = match.group(1)
                     waktu = match.group(2)
-                    deskripsi = match.group(3).strip()
+                    deskripsi_dari_baris_ini = match.group(3).strip()
+
+                    # Tambahkan baris sebelumnya ke deskripsi jika bukan angka
+                    deskripsi_tambahan = lines[i - 1].strip() if i > 0 and not re.search(r'\d{2}/\d{2}/\d{4}', lines[i - 1]) else ''
+                    deskripsi = (deskripsi_tambahan + ' ' + deskripsi_dari_baris_ini).strip()
+
                     debit = parse_amount(match.group(4))
                     kredit = parse_amount(match.group(5))
                     saldo = parse_amount(match.group(6))
-                    rows.append([tanggal, waktu, deskripsi, debit, kredit, saldo])
 
-    df = pd.DataFrame(rows, columns=["Tanggal", "Waktu", "Deskripsi", "Debit", "Kredit", "Saldo"])
-    df["Tanggal"] = pd.to_datetime(df["Tanggal"], format="%d/%m/%Y", errors="coerce")
-    return df.dropna(subset=["Tanggal"])
+                    rows.append([tanggal + ' ' + waktu, deskripsi, debit, kredit, saldo])
+
+    df = pd.DataFrame(rows, columns=["Waktu Transaksi", "Deskripsi", "Debit", "Kredit", "Saldo"])
+    df["Waktu Transaksi"] = pd.to_datetime(df["Waktu Transaksi"], format="%d/%m/%Y %H:%M:%S", errors="coerce")
+    return df.dropna(subset=["Waktu Transaksi"])
 
 
 def convert_df_to_excel(df):
@@ -52,9 +57,9 @@ def convert_df_to_excel(df):
 
 def main():
     st.set_page_config(page_title="Ekstraksi Rekening Mandiri", layout="centered")
-    st.title("Ekstraksi PDF Rekening Mandiri ke Excel")
+    st.title("📄 Ekstraksi PDF Rekening Mandiri ke Excel")
 
-    uploaded = st.file_uploader("Unggah file PDF Rekening Mandiri", type="pdf")
+    uploaded = st.file_uploader("Unggah file PDF", type="pdf")
 
     if uploaded:
         df = extract_transactions(uploaded)
