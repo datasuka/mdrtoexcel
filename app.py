@@ -5,7 +5,6 @@ from io import BytesIO
 import re
 
 def parse_amount(text):
-    """Konversi angka format Indonesia ke float"""
     try:
         return float(text.replace('.', '').replace(',', '.'))
     except:
@@ -23,7 +22,7 @@ def extract_transactions(file):
             current_block = []
 
             for line in lines:
-                # Baris pembuka transaksi
+                # Deteksi baris pembuka transaksi
                 if re.match(r'^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}$', line.strip()):
                     if current_block:
                         rows.append(current_block)
@@ -37,11 +36,10 @@ def extract_transactions(file):
     data = []
     for block in rows:
         try:
-            # Ambil tanggal & waktu dari baris pertama
             waktu_line = block[0]
             tanggal, waktu = waktu_line.split(' ')
 
-            # Cari baris angka terakhir (3 angka valid)
+            # Ambil baris angka terakhir yang punya 3 angka
             angka_line = next(
                 (l for l in reversed(block) if len(re.findall(r'-?[\d.,]+', l)) >= 3),
                 None
@@ -50,20 +48,21 @@ def extract_transactions(file):
                 continue
 
             angka = re.findall(r'-?[\d.,]+', angka_line)
+            if len(angka) < 3:
+                continue
+
             debit = parse_amount(angka[-3])
             kredit = parse_amount(angka[-2])
             saldo = parse_amount(angka[-1])
 
-            # Ambil semua baris deskripsi kecuali waktu & angka
-            deskripsi_lines = [
+            # Ambil semua baris selain waktu & angka sebagai deskripsi
+            deskripsi = ' '.join([
                 l for l in block[1:]
                 if l and l.strip() != angka_line.strip()
-            ]
-            deskripsi = ' '.join(deskripsi_lines)
+            ])
 
             data.append([f"{tanggal} {waktu}", deskripsi.strip(), debit, kredit, saldo])
-
-        except Exception as e:
+        except:
             continue
 
     df = pd.DataFrame(data, columns=["Waktu Transaksi", "Deskripsi", "Debit", "Kredit", "Saldo"])
