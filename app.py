@@ -14,36 +14,54 @@ def parse_amount(text):
 
 def extract_transactions(file):
     rows = []
-
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
-            st.text_area("DEBUG - Isi PDF", text[:3000], height=250)
+            st.text_area("DEBUG - Isi Halaman", text[:3000], height=250)
 
             lines = text.split('\n')
+            current_block = []
 
-            for i, line in enumerate(lines):
-                # Deteksi baris transaksi lengkap
-                match = re.search(
-                    r'(\d{2}/\d{2}/\d{4}) (\d{2}:\d{2}:\d{2}) (.+?) (-?\d[\d.,]*) (-?\d[\d.,]*) (-?\d[\d.,]*)$',
-                    line
-                )
-                if match:
-                    tanggal = match.group(1)
-                    waktu = match.group(2)
-                    deskripsi_dari_baris_ini = match.group(3).strip()
+            for line in lines:
+                # Awal blok transaksi: deteksi tanggal dan jam
+                if re.match(r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}', line):
+                    if current_block:
+                        rows.append(current_block)
+                    current_block = [line]
+                else:
+                    current_block.append(line)
 
-                    # Tambahkan baris sebelumnya ke deskripsi jika bukan angka
-                    deskripsi_tambahan = lines[i - 1].strip() if i > 0 and not re.search(r'\d{2}/\d{2}/\d{4}', lines[i - 1]) else ''
-                    deskripsi = (deskripsi_tambahan + ' ' + deskripsi_dari_baris_ini).strip()
+            if current_block:
+                rows.append(current_block)
 
-                    debit = parse_amount(match.group(4))
-                    kredit = parse_amount(match.group(5))
-                    saldo = parse_amount(match.group(6))
+    data = []
+    for block in rows:
+        try:
+            # Baris pertama harus tanggal waktu
+            header = block[0]
+            match = re.match(r'(\d{2}/\d{2}/\d{4}) (\d{2}:\d{2}:\d{2})', header)
+            if not match:
+                continue
+            tanggal, waktu = match.group(1), match.group(2)
 
-                    rows.append([tanggal + ' ' + waktu, deskripsi, debit, kredit, saldo])
+            # Baris angka selalu terakhir
+            angka_line = block[-1]
+            angka_parts = re.findall(r'-?[\d,.]+', angka_line)
 
-    df = pd.DataFrame(rows, columns=["Waktu Transaksi", "Deskripsi", "Debit", "Kredit", "Saldo"])
+            if len(angka_parts) < 3:
+                continue
+
+            debit = parse_amount(angka_parts[-3])
+            kredit = parse_amount(angka_parts[-2])
+            saldo = parse_amount(angka_parts[-1])
+
+            # Gabungkan semua deskripsi dari baris [1:-1]
+            deskripsi = ' '.join([l.strip() for l in block[1:-1]])
+            data.append([f"{tanggal} {waktu}", deskripsi, debit, kredit, saldo])
+        except:
+            continue
+
+    df = pd.DataFrame(data, columns=["Waktu Transaksi", "Deskripsi", "Debit", "Kredit", "Saldo"])
     df["Waktu Transaksi"] = pd.to_datetime(df["Waktu Transaksi"], format="%d/%m/%Y %H:%M:%S", errors="coerce")
     return df.dropna(subset=["Waktu Transaksi"])
 
