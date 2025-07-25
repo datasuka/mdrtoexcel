@@ -4,89 +4,72 @@ import pdfplumber
 from io import BytesIO
 import re
 
-
 def parse_amount(text):
-    """Konversi angka format Indonesia (1.000,00) ke float"""
+    """Ubah format angka lokal ke float"""
     text = text.replace('.', '').replace(',', '.')
     try:
         return float(text)
     except:
         return 0.0
 
-
 def extract_transactions(file):
-    transactions = []
+    rows = []
     with pdfplumber.open(file) as pdf:
-        for page_num, page in enumerate(pdf.pages, start=1):
+        for page in pdf.pages:
             text = page.extract_text()
-            st.subheader(f"[DEBUG] Halaman {page_num}")
-            st.text(text[:3000])  # tampilkan sebagian isi PDF (debug)
-
             lines = text.split('\n')
-            temp_block = []
+            st.text_area("DEBUG - Halaman PDF", text[:3000], height=300)
 
-            for line in lines:
-                if re.match(r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}', line):
-                    if temp_block:
-                        transactions.append(temp_block)
-                    temp_block = [line]
-                else:
-                    temp_block.append(line)
-            if temp_block:
-                transactions.append(temp_block)
+            i = 0
+            while i < len(lines):
+                line = lines[i]
 
-    data = []
-    for trx in transactions:
-        try:
-            date_time = trx[0].strip().split()
-            tanggal, waktu = date_time[0], date_time[1]
-            deskripsi = ' '.join(trx[1:-1]).strip()
-            angka_line = trx[-1]
+                # Cari baris yang mengandung tanggal dan jumlah angka
+                if re.search(r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}', line) and re.search(r'\d+,\d{2}', line):
+                    tanggal_waktu_match = re.search(r'(\d{2}/\d{2}/\d{4}) (\d{2}:\d{2}:\d{2})', line)
+                    if tanggal_waktu_match:
+                        tanggal = tanggal_waktu_match.group(1)
+                        waktu = tanggal_waktu_match.group(2)
 
-            # Tangani baris angka (misalnya: "- 25,000,000.00 0.00 52,399,575.35")
-            angka_parts = angka_line.replace('-', ' -').split()
-            angka_floats = [parse_amount(a) for a in angka_parts if re.search(r'\d', a)]
+                        # Coba ambil 2 baris sebelumnya sebagai deskripsi
+                        deskripsi = lines[i-1].strip() if i > 0 else ''
+                        if i > 1 and not re.search(r'\d', lines[i-2]):
+                            deskripsi = lines[i-2].strip() + ' ' + deskripsi
 
-            if len(angka_floats) == 3:
-                debit, kredit, saldo = angka_floats
-                data.append([tanggal, waktu, deskripsi, debit, kredit, saldo])
-        except Exception as e:
-            continue
+                        # Ambil angka dari baris ini
+                        angka_parts = line.replace('-', ' -').split()
+                        angka_floats = [parse_amount(p) for p in angka_parts if re.search(r'\d', p)]
+                        if len(angka_floats) >= 3:
+                            debit, kredit, saldo = angka_floats[-3:]
+                            rows.append([tanggal, waktu, deskripsi, debit, kredit, saldo])
+                i += 1
 
-    df = pd.DataFrame(data, columns=["Tanggal", "Waktu", "Deskripsi", "Debit", "Kredit", "Saldo"])
-    df['Tanggal'] = pd.to_datetime(df['Tanggal'], format="%d/%m/%Y", errors='coerce')
+    df = pd.DataFrame(rows, columns=["Tanggal", "Waktu", "Deskripsi", "Debit", "Kredit", "Saldo"])
+    df["Tanggal"] = pd.to_datetime(df["Tanggal"], format="%d/%m/%Y", errors="coerce")
     return df.dropna(subset=["Tanggal"])
-
 
 def convert_df_to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Transaksi')
+        df.to_excel(writer, index=False, sheet_name="Transaksi")
     return output.getvalue()
-
 
 def main():
     st.set_page_config(page_title="Ekstraksi Rekening Mandiri", layout="centered")
-    st.title("Ekstraksi Rekening Mandiri ke Excel")
-    uploaded = st.file_uploader("Unggah PDF Rekening Mandiri", type="pdf")
+    st.title("Ekstraksi PDF Rekening Mandiri ke Excel")
+
+    uploaded = st.file_uploader("Unggah file PDF", type="pdf")
 
     if uploaded:
         df = extract_transactions(uploaded)
-
         if df.empty:
             st.warning("Tidak ada transaksi berhasil diekstrak.")
         else:
-            st.success(f"Berhasil mengekstrak {len(df)} transaksi.")
+            st.success(f"{len(df)} transaksi berhasil diekstrak.")
             st.dataframe(df)
 
             excel = convert_df_to_excel(df)
-            st.download_button(
-                "Unduh Excel",
-                data=excel,
-                file_name="Rekening_Mandiri.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
+            st.download_button("Unduh Excel", data=excel, file_name="Rekening_Mandiri.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 if __name__ == "__main__":
     main()
