@@ -4,58 +4,66 @@ import pdfplumber
 from io import BytesIO
 import re
 
+
 def parse_amount(text):
-    """Konversi teks angka Indonesia ke float"""
+    """Konversi angka format Indonesia (1.000,00) ke float"""
     text = text.replace('.', '').replace(',', '.')
     try:
         return float(text)
     except:
         return 0.0
 
+
 def extract_transactions(file):
-    data = []
+    transactions = []
     with pdfplumber.open(file) as pdf:
-        for page in pdf.pages:
-            lines = page.extract_text().split('\n')
-            trx = []
+        for page_num, page in enumerate(pdf.pages, start=1):
+            text = page.extract_text()
+            st.subheader(f"[DEBUG] Halaman {page_num}")
+            st.text(text[:3000])  # tampilkan sebagian isi PDF (debug)
+
+            lines = text.split('\n')
+            temp_block = []
+
             for line in lines:
                 if re.match(r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}', line):
-                    if trx:
-                        data.append(trx)
-                    trx = [line]
+                    if temp_block:
+                        transactions.append(temp_block)
+                    temp_block = [line]
                 else:
-                    trx.append(line)
-            if trx:
-                data.append(trx)
+                    temp_block.append(line)
+            if temp_block:
+                transactions.append(temp_block)
 
-    extracted = []
-    for trx in data:
+    data = []
+    for trx in transactions:
         try:
-            date_time = trx[0].split()
-            tanggal = date_time[0]
-            waktu = date_time[1]
+            date_time = trx[0].strip().split()
+            tanggal, waktu = date_time[0], date_time[1]
             deskripsi = ' '.join(trx[1:-1]).strip()
             angka_line = trx[-1]
 
-            # Pecah baris angka, bisa saja dengan tanda minus terpisah
+            # Tangani baris angka (misalnya: "- 25,000,000.00 0.00 52,399,575.35")
             angka_parts = angka_line.replace('-', ' -').split()
-            angka_float = [parse_amount(a) for a in angka_parts if re.search(r'\d', a)]
+            angka_floats = [parse_amount(a) for a in angka_parts if re.search(r'\d', a)]
 
-            if len(angka_float) == 3:
-                debit, kredit, saldo = angka_float
-                extracted.append([tanggal, waktu, deskripsi, debit, kredit, saldo])
+            if len(angka_floats) == 3:
+                debit, kredit, saldo = angka_floats
+                data.append([tanggal, waktu, deskripsi, debit, kredit, saldo])
         except Exception as e:
             continue
 
-    df = pd.DataFrame(extracted, columns=["Tanggal", "Waktu", "Deskripsi", "Debit", "Kredit", "Saldo"])
+    df = pd.DataFrame(data, columns=["Tanggal", "Waktu", "Deskripsi", "Debit", "Kredit", "Saldo"])
     df['Tanggal'] = pd.to_datetime(df['Tanggal'], format="%d/%m/%Y", errors='coerce')
-    return df
+    return df.dropna(subset=["Tanggal"])
+
 
 def convert_df_to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Transaksi')
     return output.getvalue()
+
 
 def main():
     st.set_page_config(page_title="Ekstraksi Rekening Mandiri", layout="centered")
@@ -64,16 +72,21 @@ def main():
 
     if uploaded:
         df = extract_transactions(uploaded)
-        st.success(f"Berhasil mengekstrak {len(df)} transaksi.")
-        st.dataframe(df)
 
-        excel = convert_df_to_excel(df)
-        st.download_button(
-            "Unduh Excel",
-            data=excel,
-            file_name="Rekening_Mandiri.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        if df.empty:
+            st.warning("Tidak ada transaksi berhasil diekstrak.")
+        else:
+            st.success(f"Berhasil mengekstrak {len(df)} transaksi.")
+            st.dataframe(df)
+
+            excel = convert_df_to_excel(df)
+            st.download_button(
+                "Unduh Excel",
+                data=excel,
+                file_name="Rekening_Mandiri.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
 
 if __name__ == "__main__":
     main()
