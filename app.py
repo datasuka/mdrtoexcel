@@ -28,16 +28,20 @@ def extract_transactions_from_pdf(pdf_file):
 def process_transaction(lines):
     try:
         tanggal = lines[0][:10]
-        angka_line = next((l for l in lines if l.startswith('-')), '')
+        angka_line = next((l for l in lines if any(char.isdigit() for char in l) and any(sep in l for sep in [",", "."])), '')
         if not angka_line:
             return None
         parts = angka_line.strip().split()
-        if len(parts) >= 4:
-            debit = float(parts[1].replace(',', '').replace('.', '', parts[1].count('.')-1))
-            kredit = float(parts[2].replace(',', '').replace('.', '', parts[2].count('.')-1))
-            saldo = float(parts[3].replace(',', '').replace('.', '', parts[3].count('.')-1))
-        else:
+        floats = []
+        for p in parts:
+            try:
+                val = float(p.replace('.', '').replace(',', '.'))
+                floats.append(val)
+            except:
+                continue
+        if len(floats) < 3:
             return None
+        debit, kredit, saldo = floats[-3], floats[-2], floats[-1]
         deskripsi = ' '.join(lines[1:lines.index(angka_line)]).replace('  ', ' ')
         return [tanggal, deskripsi, debit, kredit, saldo]
     except:
