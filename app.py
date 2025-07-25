@@ -4,14 +4,14 @@ import pdfplumber
 from io import BytesIO
 import re
 
-def parse_amount(text):
+def parse_amount(val):
     try:
-        return float(text.replace('.', '').replace(',', '.').replace('−', '-'))
+        return float(val.replace('.', '').replace(',', '.').replace('−', '-'))
     except:
         return 0.0
 
 def extract_transactions(file):
-    transaksi = []
+    results = []
 
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
@@ -20,51 +20,39 @@ def extract_transactions(file):
                 continue
             lines = text.split('\n')
 
-            current_block = []
-            for line in lines:
-                # Cek baris pembuka transaksi
-                if re.match(r'^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}$', line.strip()):
-                    if current_block:
-                        transaksi.append(current_block)
-                    current_block = [line.strip()]
-                else:
-                    current_block.append(line.strip())
-            if current_block:
-                transaksi.append(current_block)
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
 
-    hasil = []
-    for block in transaksi:
-        try:
-            waktu_line = block[0]
-            tanggal, jam = waktu_line.split()
-            waktu_transaksi = f"{tanggal} {jam}"
+                if re.match(r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}', line):
+                    waktu = line
+                    deskripsi = []
+                    angka_line = None
 
-            # Baris angka (biasanya di akhir blok)
-            angka_line = next(
-                (l for l in reversed(block) if len(re.findall(r'-?[\d.,]+', l)) >= 3),
-                None
-            )
-            if not angka_line:
-                continue
+                    # Ambil 3 baris deskripsi berikutnya
+                    for j in range(1, 6):
+                        if i + j < len(lines):
+                            next_line = lines[i + j].strip()
+                            # Deteksi baris angka
+                            if len(re.findall(r'-?[\d.,]+', next_line)) >= 3:
+                                angka_line = next_line
+                                i += j  # lompat ke angka_line
+                                break
+                            else:
+                                deskripsi.append(next_line)
 
-            angka = re.findall(r'-?[\d.,]+', angka_line)
-            if len(angka) < 3:
-                continue
+                    if angka_line:
+                        angka = re.findall(r'-?[\d.,]+', angka_line)
+                        if len(angka) >= 3:
+                            debit = parse_amount(angka[-3])
+                            kredit = parse_amount(angka[-2])
+                            saldo = parse_amount(angka[-1])
 
-            debit = parse_amount(angka[-3])
-            kredit = parse_amount(angka[-2])
-            saldo = parse_amount(angka[-1])
+                            deskripsi_joined = ' '.join(deskripsi).strip()
+                            results.append([waktu, deskripsi_joined, debit, kredit, saldo])
+                i += 1
 
-            # Ambil deskripsi: semua baris kecuali waktu dan angka
-            deskripsi = ' '.join([
-                l for l in block[1:] if l.strip() and l.strip() != angka_line.strip()
-            ])
-
-            hasil.append([waktu_transaksi, deskripsi, debit, kredit, saldo])
-        except:
-            continue
-
-    df = pd.DataFrame(hasil, columns=["Waktu Transaksi", "Deskripsi", "Debit", "Kredit", "Saldo"])
+    df = pd.DataFrame(results, columns=["Waktu Transaksi", "Deskripsi", "Debit", "Kredit", "Saldo"])
     df["Waktu Transaksi"] = pd.to_datetime(df["Waktu Transaksi"], format="%d/%m/%Y %H:%M:%S", errors="coerce")
     return df.dropna()
 
