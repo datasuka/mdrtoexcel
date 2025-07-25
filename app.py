@@ -11,36 +11,37 @@ def extract_transactions_from_pdf(pdf_file):
         for page in pdf.pages:
             lines = page.extract_text().split('\n')
             for line in lines:
-                if re.match(r'\d{2}/\d{2}/\d{4}', line[:10]):
+                if re.match(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}", line):
                     if buffer:
-                        transactions.append(process_transaction(buffer))
+                        txn = process_transaction(buffer)
+                        if txn: transactions.append(txn)
                         buffer = []
-                buffer.append(line)
+                buffer.append(line.strip())
             if buffer:
-                transactions.append(process_transaction(buffer))
+                txn = process_transaction(buffer)
+                if txn: transactions.append(txn)
                 buffer = []
     df = pd.DataFrame(transactions, columns=["Tanggal", "Deskripsi", "Debit", "Kredit", "Saldo"])
     df["Tanggal"] = pd.to_datetime(df["Tanggal"], format="%d/%m/%Y", errors='coerce')
     return df.dropna(subset=["Tanggal"])
 
 def process_transaction(lines):
-    tanggal = lines[0][:10]
-    deskripsi = ' '.join(l.strip() for l in lines[1:-1])
-    angka = lines[-1].strip().split()
-    debit, kredit, saldo = 0.0, 0.0, 0.0
     try:
-        if angka[0] == '-':
-            debit = float(angka[1].replace(',', '').replace('.', '', angka[1].count('.')-1))
-            kredit = float(angka[2].replace(',', '').replace('.', '', angka[2].count('.')-1))
-            saldo = float(angka[3].replace(',', '').replace('.', '', angka[3].count('.')-1))
+        tanggal = lines[0][:10]
+        angka_line = next((l for l in lines if l.startswith('-')), '')
+        if not angka_line:
+            return None
+        parts = angka_line.strip().split()
+        if len(parts) >= 4:
+            debit = float(parts[1].replace(',', '').replace('.', '', parts[1].count('.')-1))
+            kredit = float(parts[2].replace(',', '').replace('.', '', parts[2].count('.')-1))
+            saldo = float(parts[3].replace(',', '').replace('.', '', parts[3].count('.')-1))
         else:
-            deskripsi += ' ' + ' '.join(angka[:-3])
-            debit = float(angka[-3].replace(',', '').replace('.', '', angka[-3].count('.')-1))
-            kredit = float(angka[-2].replace(',', '').replace('.', '', angka[-2].count('.')-1))
-            saldo = float(angka[-1].replace(',', '').replace('.', '', angka[-1].count('.')-1))
+            return None
+        deskripsi = ' '.join(lines[1:lines.index(angka_line)]).replace('  ', ' ')
+        return [tanggal, deskripsi, debit, kredit, saldo]
     except:
-        pass
-    return [tanggal, deskripsi, debit, kredit, saldo]
+        return None
 
 def convert_df_to_excel(df):
     output = BytesIO()
