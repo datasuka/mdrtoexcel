@@ -1,20 +1,35 @@
+import streamlit as st
+import pandas as pd
+import pdfplumber
+from io import BytesIO
+import re
+
+def parse_amount(text):
+    """Konversi angka format Indonesia ke float"""
+    try:
+        return float(text.replace('.', '').replace(',', '.'))
+    except:
+        return 0.0
+
 def extract_transactions(file):
     rows = []
 
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
-            st.text_area("DEBUG - Isi PDF", text[:3000], height=250)
+            if not text:
+                continue
             lines = text.split('\n')
             current_block = []
 
             for line in lines:
+                # Baris pembuka transaksi
                 if re.match(r'^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}$', line.strip()):
                     if current_block:
                         rows.append(current_block)
-                    current_block = [line]
+                    current_block = [line.strip()]
                 else:
-                    current_block.append(line)
+                    current_block.append(line.strip())
 
             if current_block:
                 rows.append(current_block)
@@ -22,11 +37,11 @@ def extract_transactions(file):
     data = []
     for block in rows:
         try:
-            # Ambil tanggal dan waktu dari baris pertama
-            waktu_line = block[0].strip()
-            tanggal, waktu = waktu_line.split(" ")
+            # Ambil tanggal & waktu dari baris pertama
+            waktu_line = block[0]
+            tanggal, waktu = waktu_line.split(' ')
 
-            # Ambil baris angka dari blok terakhir yang mengandung 3 angka valid
+            # Cari baris angka terakhir (3 angka valid)
             angka_line = next(
                 (l for l in reversed(block) if len(re.findall(r'-?[\d.,]+', l)) >= 3),
                 None
@@ -39,14 +54,50 @@ def extract_transactions(file):
             kredit = parse_amount(angka[-2])
             saldo = parse_amount(angka[-1])
 
-            # Gabungkan deskripsi dari seluruh baris selain waktu dan angka
-            deskripsi_lines = [l.strip() for l in block[1:] if l.strip() != angka_line.strip()]
+            # Ambil semua baris deskripsi kecuali waktu & angka
+            deskripsi_lines = [
+                l for l in block[1:]
+                if l and l.strip() != angka_line.strip()
+            ]
             deskripsi = ' '.join(deskripsi_lines)
 
-            data.append([f"{tanggal} {waktu}", deskripsi, debit, kredit, saldo])
+            data.append([f"{tanggal} {waktu}", deskripsi.strip(), debit, kredit, saldo])
+
         except Exception as e:
             continue
 
     df = pd.DataFrame(data, columns=["Waktu Transaksi", "Deskripsi", "Debit", "Kredit", "Saldo"])
     df["Waktu Transaksi"] = pd.to_datetime(df["Waktu Transaksi"], format="%d/%m/%Y %H:%M:%S", errors="coerce")
     return df.dropna(subset=["Waktu Transaksi"])
+
+def convert_df_to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name="Transaksi")
+    return output.getvalue()
+
+def main():
+    st.set_page_config(page_title="Ekstraksi Rekening Mandiri", layout="centered")
+    st.title("📄 Ekstraksi PDF Rekening Mandiri ke Excel")
+
+    uploaded = st.file_uploader("Unggah file PDF", type="pdf")
+
+    if uploaded:
+        df = extract_transactions(uploaded)
+
+        if df.empty:
+            st.warning("⚠️ Tidak ada transaksi berhasil diekstrak.")
+        else:
+            st.success(f"✅ {len(df)} transaksi berhasil diekstrak.")
+            st.dataframe(df)
+
+            excel_data = convert_df_to_excel(df)
+            st.download_button(
+                label="📥 Unduh Excel",
+                data=excel_data,
+                file_name="Rekening_Mandiri.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+if __name__ == "__main__":
+    main()
