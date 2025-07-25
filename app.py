@@ -11,7 +11,7 @@ def extract_transactions_from_pdf(file):
         for page in pdf.pages:
             lines = page.extract_text().split('\n')
             for line in lines:
-                if re.match(r'\\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2}:\\d{2}', line):
+                if re.match(r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}', line):
                     if current:
                         rows.append(current)
                     current = [line]
@@ -24,16 +24,22 @@ def extract_transactions_from_pdf(file):
     for r in rows:
         try:
             tanggal = r[0].split(' ')[0]
-            angka_line = next((l for l in r if '-' in l and re.search(r'\\d', l)), '')
+            angka_line = next((l for l in r if '-' in l and re.search(r'\d', l)), '')
             if not angka_line:
                 continue
-            parts = angka_line.replace(',', '').replace('.', '').split()
-            floats = [float(p.replace(',', '').replace('.', '')) for p in angka_line.split() if re.search(r'\\d', p)]
+            parts = angka_line.strip().split()
+            floats = []
+            for p in parts:
+                try:
+                    val = float(p.replace('.', '').replace(',', '.'))
+                    floats.append(val)
+                except:
+                    continue
             if len(floats) >= 3:
                 debit, kredit, saldo = floats[-3], floats[-2], floats[-1]
             else:
                 continue
-            deskripsi = ' '.join(l for l in r[1:] if l != angka_line).strip()
+            deskripsi = ' '.join([l for l in r[1:] if l != angka_line]).strip()
             results.append([tanggal, deskripsi, debit, kredit, saldo])
         except:
             continue
@@ -49,16 +55,16 @@ def convert_df_to_excel(df):
     return buffer.getvalue()
 
 def main():
-    st.title(\"Konversi Rekening Mandiri ke Excel\")
-    st.write(\"Aplikasi ini mengonversi data rekening Mandiri menjadi file Excel.\")
+    st.title("Konversi Rekening Mandiri ke Excel")
+    st.write("Aplikasi ini mengonversi data rekening Mandiri menjadi file Excel.")
 
-    uploaded = st.file_uploader(\"Unggah PDF Rekening Mandiri\", type=\"pdf\")
+    uploaded = st.file_uploader("Unggah PDF Rekening Mandiri", type="pdf")
     if uploaded:
         df = extract_transactions_from_pdf(uploaded)
         st.dataframe(df)
 
         excel = convert_df_to_excel(df)
-        st.download_button(\"Unduh Excel\", data=excel, file_name=\"Rekening_Mandiri.xlsx\", mime=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\")
+        st.download_button("Unduh Excel", data=excel, file_name="Rekening_Mandiri.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 if __name__ == '__main__':
     main()
